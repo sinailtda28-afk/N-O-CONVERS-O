@@ -933,18 +933,36 @@ function salvarPedido() {
   const obs     = document.getElementById('pedido-obs').value.trim();
   if (!nome)    { showToast('⚠️ Preencha o nome'); return; }
   if (!produto) { showToast('⚠️ Preencha o produto'); return; }
+
+  // Bloqueia duplo clique
+  const btnSalvar = document.querySelector('#modal-pedido .btn-confirm-teal');
+  if (btnSalvar) btnSalvar.disabled = true;
+
   const id = gerarId();
-  const pedido = {action:'pedido',id,nome,tel,produto,obs,data:getData(),hora:getHora()};
+  const novoPedido = {id,nome,tel,produto,obs,data:getData(),hora:getHora()};
+  const pedido = {action:'pedido',...novoPedido};
+
+  // Adiciona localmente já com ID único — carregarPedidos vai deduplicar pelo ID
+  pedidosCache.push(novoPedido);
+
   apiPost(pedido).then(r=>{
+    if (btnSalvar) btnSalvar.disabled = false;
     if (r && r.ok) {
-      pedidosCache.push({id,nome,tel,produto,obs,data:getData(),hora:getHora()});
       showToast('📋 Pedido salvo!');
       document.getElementById('pedido-nome').value = '';
       document.getElementById('pedido-tel').value  = '';
       document.getElementById('pedido-produto').value = '';
       document.getElementById('pedido-obs').value  = '';
       fecharModal('modal-pedido');
-    } else { showToast('❌ Erro ao salvar pedido'); }
+    } else {
+      // Reverte o push local se o servidor falhou
+      pedidosCache = pedidosCache.filter(p => p.id !== id);
+      showToast('❌ Erro ao salvar pedido');
+    }
+  }).catch(() => {
+    if (btnSalvar) btnSalvar.disabled = false;
+    pedidosCache = pedidosCache.filter(p => p.id !== id);
+    showToast('❌ Erro de conexão');
   });
 }
 
@@ -956,7 +974,11 @@ async function carregarPedidos() {
     const resp = await fetch(APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'pedidos'}),redirect:'follow'});
     const json = JSON.parse(await resp.text());
     if (json.ok && Array.isArray(json.pedidos)) {
-      pedidosCache = json.pedidos; renderTodosPedidos(); buscarPedidos();
+      // Mescla servidor + locais não confirmados, deduplica pelo ID
+      const idsServidor = new Set(json.pedidos.map(p => p.id));
+      const locaisExtras = pedidosCache.filter(p => !idsServidor.has(p.id));
+      pedidosCache = [...json.pedidos, ...locaisExtras];
+      renderTodosPedidos(); buscarPedidos();
     } else {
       document.getElementById('lista-todos').innerHTML = '<div class="empty-feed">Nenhum pedido cadastrado ainda</div>';
     }
