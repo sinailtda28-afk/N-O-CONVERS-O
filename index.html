@@ -546,19 +546,41 @@ async function carregarDoServidor(){
   try{
     const json=JSON.parse(await(await fetch(APPS_SCRIPT_URL+'?action=registros')).text());
     if(json.ok&&Array.isArray(json.registros)){
-      allRegistrosServidor=json.registros.map(r=>({id:r.id,tipo:r.tipo,hora:normalizarHora(r.hora),data:normalizarData(r.data),detalhe:r.detalhe}));
-      const hISO=new Date().toISOString().slice(0,10),hBR=new Date().toLocaleDateString('pt-BR');
-      const regH=json.registros.filter(r=>{const d=String(r.data||'');return d.includes(hISO)||d.includes(hBR)||d==='';});
+      // Normaliza todos os registros do servidor primeiro
+      const todosNorm=json.registros.map(r=>({
+        id:r.id, tipo:r.tipo,
+        hora:normalizarHora(r.hora),
+        data:normalizarData(r.data),
+        detalhe:r.detalhe||''
+      }));
+      allRegistrosServidor=todosNorm;
+
+      // Filtra os de hoje comparando em ISO (yyyy-MM-dd)
+      const hojeISO=new Date().toISOString().slice(0,10);
+      const regH=todosNorm.filter(r=>{
+        const d=String(r.data||'');
+        return d==='' || dataParaISO(d)===hojeISO;
+      });
+
       const idsS=new Set(regH.map(r=>r.id));
       const pL=(state.pendentes||[]).filter(id=>!idsS.has(id));
       const lN=state.registros.filter(r=>pL.includes(r.id));
-      state.registros=[...regH.map(r=>({id:r.id,tipo:r.tipo,hora:normalizarHora(r.hora),data:normalizarData(r.data),detalhe:r.detalhe})),...lN];
+      state.registros=[...regH,...lN];
       state.registros.sort((a,b)=>a.hora.localeCompare(b.hora));
       recalcularContadores();salvarLocal();updateUI();renderFeed();
       setSyncStatus('ok',`Sincronizado ✓ — ${state.registros.length} reg.`);
       if(document.getElementById('screen-dashboard').classList.contains('active'))renderDashboard();
     }else{setSyncStatus('ok','Conectado ✓');}
-  }catch{setSyncStatus('erro','Sem conexão — dados locais');}
+  }catch(err){setSyncStatus('erro','Sem conexão — dados locais');}
+}
+
+// Converte qualquer formato de data para yyyy-MM-dd
+function dataParaISO(d){
+  if(!d) return '';
+  const s=String(d).trim();
+  if(/^\d{2}\/\d{2}\/\d{4}/.test(s)){const[dd,mm,yyyy]=s.slice(0,10).split('/');return yyyy+'-'+mm+'-'+dd;}
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  return '';
 }
 
 function setSyncStatus(tipo,msg){
